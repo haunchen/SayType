@@ -109,6 +109,14 @@ src/i18n/
 - Tailwind CSS for styling
 - Path aliases: `@/` → `./src/`
 
+## Git Operations
+
+This is a fork repository. All git operations (push, PR, merge) should target the owner's repo (origin: haunchen/SayType), NOT the upstream repo (cjpais/Handy).
+
+- Push to: `origin` (haunchen/SayType)
+- Create PR on: `haunchen/SayType`
+- Never push or create PR to upstream
+
 ## Commit Guidelines
 
 Use conventional commits:
