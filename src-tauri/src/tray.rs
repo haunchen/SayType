@@ -39,20 +39,12 @@ pub fn get_current_theme(app: &AppHandle) -> AppTheme {
 }
 
 /// Gets the appropriate icon path for the given theme and state
-pub fn get_icon_path(theme: AppTheme, state: TrayIconState) -> &'static str {
-    match (theme, state) {
-        // Dark theme uses light icons
-        (AppTheme::Dark, TrayIconState::Idle) => "resources/tray_idle.png",
-        (AppTheme::Dark, TrayIconState::Recording) => "resources/tray_recording.png",
-        (AppTheme::Dark, TrayIconState::Transcribing) => "resources/tray_transcribing.png",
-        // Light theme uses dark icons
-        (AppTheme::Light, TrayIconState::Idle) => "resources/tray_idle_dark.png",
-        (AppTheme::Light, TrayIconState::Recording) => "resources/tray_recording_dark.png",
-        (AppTheme::Light, TrayIconState::Transcribing) => "resources/tray_transcribing_dark.png",
-        // Colored theme uses pink icons (for Linux)
-        (AppTheme::Colored, TrayIconState::Idle) => "resources/saytype.png",
-        (AppTheme::Colored, TrayIconState::Recording) => "resources/recording.png",
-        (AppTheme::Colored, TrayIconState::Transcribing) => "resources/transcribing.png",
+pub fn get_icon_path(_theme: AppTheme, state: TrayIconState) -> &'static str {
+    // Use colored icon for all themes (looks better in menu bar)
+    match state {
+        TrayIconState::Idle => "resources/tray_color.png",
+        TrayIconState::Recording => "resources/tray_color.png",
+        TrayIconState::Transcribing => "resources/tray_color.png",
     }
 }
 
@@ -150,5 +142,6 @@ pub fn update_tray_menu(app: &AppHandle, state: &TrayIconState, locale: Option<&
 
     let tray = app.state::<TrayIcon>();
     let _ = tray.set_menu(Some(menu));
-    let _ = tray.set_icon_as_template(true);
+    // Don't use template mode - we want colored icons
+    let _ = tray.set_icon_as_template(false);
 }

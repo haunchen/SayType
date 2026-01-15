@@ -39,6 +39,14 @@ use tauri::image::Image;
 use tauri::tray::TrayIconBuilder;
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
+
+// macOS 開發模式下手動設定 dock 圖示
+#[cfg(all(debug_assertions, target_os = "macos"))]
+use tauri_nspanel::objc2::AllocAnyThread;
+#[cfg(all(debug_assertions, target_os = "macos"))]
+use tauri_nspanel::objc2_app_kit::{NSApplication, NSImage};
+#[cfg(all(debug_assertions, target_os = "macos"))]
+use tauri_nspanel::objc2_foundation::{MainThreadMarker, NSData};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy, Target, TargetKind};
 
@@ -171,7 +179,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
             .unwrap(),
         )
         .show_menu_on_left_click(true)
-        .icon_as_template(true)
+        .icon_as_template(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "settings" => {
                 show_main_window(app);
@@ -485,6 +493,27 @@ pub fn run() {
             let app_handle = app.handle().clone();
 
             initialize_core_logic(&app_handle);
+
+            // 開發模式下手動設定 dock 圖示（延遲執行以避免被 Tauri 覆蓋）
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            {
+                let app_handle_clone = app_handle.clone();
+                std::thread::spawn(move || {
+                    // 等待 Tauri 完成初始化
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+
+                    let _ = app_handle_clone.run_on_main_thread(move || {
+                        let icon_bytes = include_bytes!("../icons/icon.png");
+                        let mtm = unsafe { MainThreadMarker::new_unchecked() };
+                        let ns_app = NSApplication::sharedApplication(mtm);
+                        let data = NSData::with_bytes(icon_bytes);
+                        if let Some(app_icon) = NSImage::initWithData(NSImage::alloc(), &data) {
+                            unsafe { ns_app.setApplicationIconImage(Some(&app_icon)) };
+                            log::info!("Dock icon set successfully in dev mode (delayed)");
+                        }
+                    });
+                });
+            }
 
             // Show main window only if not starting hidden
             if !settings.start_hidden {
