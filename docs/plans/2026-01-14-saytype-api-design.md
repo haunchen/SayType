@@ -2,7 +2,7 @@
 
 > For Claude: REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-Goal: 讓 Handy 桌面應用程式對外提供語音轉文字 HTTP API，供手機端 App 透過區域網路呼叫。
+Goal: 讓 SayType 桌面應用程式對外提供語音轉文字 HTTP API，供手機端 App 透過區域網路呼叫。
 
 Architecture: 使用 axum 框架建立 HTTP 伺服器，透過 Tauri state 存取 TranscriptionManager 執行轉錄。設定儲存於現有的 tauri-plugin-store。前端使用 React 提供設定介面。
 
