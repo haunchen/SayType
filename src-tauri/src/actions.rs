@@ -49,7 +49,7 @@ async fn maybe_post_process_transcription(
         .cloned()
         .unwrap_or_default();
 
-    if model.trim().is_empty() {
+    if model.trim().is_empty() && provider.id != "claude-cli" {
         debug!(
             "Post-processing skipped because provider '{}' has no model configured",
             provider.id
@@ -128,6 +128,25 @@ async fn maybe_post_process_transcription(
             debug!("Apple Intelligence provider selected on unsupported platform");
             return None;
         }
+    }
+
+    // Claude Code CLI provider
+    if provider.id == "claude-cli" {
+        return match crate::claude_cli::polish_with_claude_cli(transcription, &processed_prompt)
+            .await
+        {
+            Ok(result) => {
+                debug!(
+                    "Claude CLI post-processing succeeded. Output length: {} chars",
+                    result.len()
+                );
+                Some(result)
+            }
+            Err(err) => {
+                error!("Claude CLI post-processing failed: {}", err);
+                None
+            }
+        };
     }
 
     let api_key = settings
