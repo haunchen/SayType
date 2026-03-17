@@ -389,6 +389,12 @@ mod tests {
     }
 
     #[test]
+    fn test_ogg_invalid_data() {
+        let result = convert_from_bytes(&[0, 1, 2, 3], "ogg");
+        assert!(matches!(result, Err(AudioConvertError::OggDecodeError(_))));
+    }
+
+    #[test]
     fn test_invalid_base64() {
         let result = convert_from_base64("not-valid-base64!!!", "wav");
         assert!(matches!(
