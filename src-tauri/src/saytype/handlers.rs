@@ -143,11 +143,76 @@ pub async fn transcribe(
 
     match transcription_result {
         Ok(text) => {
+            // 潤飾處理（如果請求啟用且設定中有 provider）
+            let polished_text = if request.polish.unwrap_or(false) && !text.trim().is_empty() {
+                let settings = crate::settings::get_settings(&state.app_handle);
+                if settings.post_process_enabled {
+                    // 取得 prompt
+                    let prompt = settings
+                        .post_process_selected_prompt_id
+                        .as_ref()
+                        .and_then(|id| {
+                            settings
+                                .post_process_prompts
+                                .iter()
+                                .find(|p| p.id == *id)
+                        })
+                        .map(|p| p.prompt.replace("${output}", &text));
+
+                    if let Some(prompt) = prompt {
+                        let provider = settings.active_post_process_provider().cloned();
+                        match provider {
+                            Some(ref p) if p.id == "claude-cli" => {
+                                match crate::claude_cli::polish_with_claude_cli(&text, &prompt)
+                                    .await
+                                {
+                                    Ok(polished) => polished,
+                                    Err(e) => {
+                                        log::warn!("Polish failed: {}", e);
+                                        text.clone()
+                                    }
+                                }
+                            }
+                            Some(ref p) => {
+                                let api_key = settings
+                                    .post_process_api_keys
+                                    .get(&p.id)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let model = settings
+                                    .post_process_models
+                                    .get(&p.id)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                match crate::llm_client::send_chat_completion(
+                                    p, api_key, &model, prompt,
+                                )
+                                .await
+                                {
+                                    Ok(Some(polished)) => polished,
+                                    _ => {
+                                        log::warn!("LLM polish failed, returning raw text");
+                                        text.clone()
+                                    }
+                                }
+                            }
+                            None => text.clone(),
+                        }
+                    } else {
+                        text.clone()
+                    }
+                } else {
+                    text.clone()
+                }
+            } else {
+                text.clone()
+            };
+
             let processing_time_ms = start_time.elapsed().as_millis() as u64;
             let response = TranscribeResponse {
                 success: true,
-                raw_text: text.clone(),
-                polished_text: text, // 目前不處理潤飾
+                raw_text: text,
+                polished_text,
                 language: "auto".to_string(),
                 processing_time_ms,
             };
