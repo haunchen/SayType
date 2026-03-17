@@ -8,6 +8,7 @@ mod commands;
 mod helpers;
 mod input;
 mod llm_client;
+mod claude_cli;
 mod managers;
 mod overlay;
 mod settings;
