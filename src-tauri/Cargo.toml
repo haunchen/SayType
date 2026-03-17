@@ -78,6 +78,7 @@ axum = { version = "0.8", optional = true }
 tower-http = { version = "0.6", features = ["cors"], optional = true }
 base64 = { version = "0.22", optional = true }
 rand = { version = "0.8", optional = true }
+symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
@@ -109,4 +110,4 @@ panic = "abort"
 # SayType Feature Flags
 [features]
 default = []
-saytype = ["dep:axum", "dep:tower-http", "dep:base64", "dep:rand"]
+saytype = ["dep:axum", "dep:tower-http", "dep:base64", "dep:rand", "dep:symphonia"]
