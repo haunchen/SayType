@@ -202,6 +202,8 @@ New-Item -ItemType Directory -Force -Path "$env:APPDATA\com.saytype.app\models"
 
 Download the models you want from below
 
+> **Note:** Model files are hosted by the upstream [Handy](https://github.com/cjpais/Handy) project at `blob.handy.computer`.
+
 **Whisper Models (single .bin files):**
 
 - Small (487 MB): `https://blob.handy.computer/ggml-small.bin`
@@ -267,7 +269,7 @@ Final structure should look like:
 2. **Fork the repository** and create a feature branch
 3. **Test thoroughly** on your target platform
 4. **Submit a pull request** with clear description of changes
-5. **Join the discussion** - reach out at [contact@handy.computer](mailto:contact@handy.computer)
+5. **Join the discussion** - open an issue or discussion on [GitHub](https://github.com/haunchen/SayType)
 
 The goal is to create both a useful tool and a foundation for others to build upon—a well-patterned, simple codebase that serves the community.
 
@@ -287,8 +289,8 @@ The goal is to create both a useful tool and a foundation for others to build up
 
 ## Related Projects
 
+- **[Handy](https://github.com/cjpais/Handy)** - The original project that SayType is forked from
 - **[Handy CLI](https://github.com/cjpais/handy-cli)** - The original Python command-line version
-- **[handy.computer](https://handy.computer)** - Project website with demos and documentation
 
 ## License
 
