@@ -14,6 +14,8 @@ pub enum AudioConvertError {
     Base64DecodeError(base64::DecodeError),
     /// WAV 解碼錯誤
     WavDecodeError(hound::Error),
+    /// OGG 解碼錯誤
+    OggDecodeError(String),
     /// 不支援的格式
     UnsupportedFormat(String),
     /// 不支援的取樣格式
@@ -25,6 +27,7 @@ impl fmt::Display for AudioConvertError {
         match self {
             AudioConvertError::Base64DecodeError(e) => write!(f, "Base64 decode error: {}", e),
             AudioConvertError::WavDecodeError(e) => write!(f, "WAV decode error: {}", e),
+            AudioConvertError::OggDecodeError(e) => write!(f, "OGG decode error: {}", e),
             AudioConvertError::UnsupportedFormat(format) => {
                 write!(f, "Unsupported format: {}", format)
             }
@@ -79,12 +82,7 @@ pub fn convert_from_bytes(
 ) -> Result<AudioConvertResult, AudioConvertError> {
     match format.to_lowercase().as_str() {
         "wav" => decode_wav(bytes),
-        "ogg" => {
-            // OGG/Opus 支援將在後續實作
-            Err(AudioConvertError::UnsupportedFormat(
-                "ogg (not yet implemented)".to_string(),
-            ))
-        }
+        "ogg" => decode_ogg(bytes),
         _ => Err(AudioConvertError::UnsupportedFormat(format.to_string())),
     }
 }
@@ -134,6 +132,194 @@ fn decode_wav(bytes: &[u8]) -> Result<AudioConvertResult, AudioConvertError> {
     })
 }
 
+/// 解碼 OGG 檔案（支援 Vorbis 和 Opus codec）並重採樣至 16kHz mono
+fn decode_ogg(bytes: &[u8]) -> Result<AudioConvertResult, AudioConvertError> {
+    // 讀取第一個 packet 來偵測 codec
+    let cursor = Cursor::new(bytes);
+    let mut packet_reader = ogg::PacketReader::new(cursor);
+    let first_packet = packet_reader
+        .read_packet()
+        .map_err(|e| AudioConvertError::OggDecodeError(e.to_string()))?
+        .ok_or_else(|| AudioConvertError::OggDecodeError("Empty OGG stream".to_string()))?;
+
+    let data = &first_packet.data;
+
+    // 偵測 codec
+    let is_vorbis = data.len() >= 7
+        && data[0] == 0x01
+        && data[1] == b'v'
+        && data[2] == b'o'
+        && data[3] == b'r'
+        && data[4] == b'b'
+        && data[5] == b'i'
+        && data[6] == b's';
+    let is_opus = data.len() >= 8 && &data[..8] == b"OpusHead";
+
+    if is_vorbis {
+        decode_ogg_vorbis(bytes)
+    } else if is_opus {
+        decode_ogg_opus(bytes, data)
+    } else {
+        Err(AudioConvertError::OggDecodeError(
+            "Unknown OGG codec".to_string(),
+        ))
+    }
+}
+
+/// 解碼 OGG/Vorbis
+fn decode_ogg_vorbis(bytes: &[u8]) -> Result<AudioConvertResult, AudioConvertError> {
+    let cursor = Cursor::new(bytes);
+    let mut reader = lewton::inside_ogg::OggStreamReader::new(cursor)
+        .map_err(|e| AudioConvertError::OggDecodeError(e.to_string()))?;
+
+    let channels = reader.ident_hdr.audio_channels as usize;
+    let sample_rate = reader.ident_hdr.audio_sample_rate;
+
+    // 逐 packet 解碼為 i16 interleaved samples
+    let mut all_samples: Vec<f32> = Vec::new();
+    loop {
+        match reader.read_dec_packet_itl() {
+            Ok(Some(packet)) => {
+                // lewton 回傳 i16 interleaved samples
+                for s in packet {
+                    all_samples.push(s as f32 / 32768.0);
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                return Err(AudioConvertError::OggDecodeError(e.to_string()));
+            }
+        }
+    }
+
+    // 轉換為 mono
+    let mono_samples = if channels > 1 {
+        all_samples
+            .chunks(channels)
+            .map(|chunk| chunk.iter().sum::<f32>() / chunk.len() as f32)
+            .collect()
+    } else {
+        all_samples
+    };
+
+    // 重採樣至 16kHz
+    let target_sample_rate = 16000;
+    let final_samples = if sample_rate != target_sample_rate {
+        resample(&mono_samples, sample_rate, target_sample_rate)
+    } else {
+        mono_samples
+    };
+
+    let duration_ms = (final_samples.len() as u64 * 1000) / target_sample_rate as u64;
+
+    Ok(AudioConvertResult {
+        samples: final_samples,
+        duration_ms,
+    })
+}
+
+/// 解碼 OGG/Opus
+fn decode_ogg_opus(bytes: &[u8], opus_head: &[u8]) -> Result<AudioConvertResult, AudioConvertError> {
+    // 解析 OpusHead header
+    if opus_head.len() < 19 {
+        return Err(AudioConvertError::OggDecodeError(
+            "OpusHead header too short".to_string(),
+        ));
+    }
+
+    let channel_count = opus_head[9] as usize;
+    let pre_skip = u16::from_le_bytes([opus_head[10], opus_head[11]]) as usize;
+    // bytes 12-15 = input_sample_rate (informational only)
+    // Opus 固定解碼輸出 48kHz
+
+    if channel_count == 0 || channel_count > 2 {
+        return Err(AudioConvertError::OggDecodeError(
+            format!("Unsupported channel count: {}", channel_count),
+        ));
+    }
+
+    let opus_sample_rate: u32 = 48000;
+    let mut decoder = opus_decoder::OpusDecoder::new(opus_sample_rate, channel_count)
+        .map_err(|e| AudioConvertError::OggDecodeError(e.to_string()))?;
+
+    // 用新的 PacketReader 從頭重新讀取
+    let cursor = Cursor::new(bytes);
+    let mut packet_reader = ogg::PacketReader::new(cursor);
+
+    const MAX_FRAME_SIZE: usize = 5760; // 48kHz * 120ms
+    let mut all_samples: Vec<f32> = Vec::new();
+    let mut packet_index: usize = 0;
+    let mut samples_decoded: usize = 0;
+
+    loop {
+        let packet = match packet_reader.read_packet() {
+            Ok(Some(p)) => p,
+            Ok(None) => break,
+            Err(e) => {
+                return Err(AudioConvertError::OggDecodeError(e.to_string()));
+            }
+        };
+
+        // 跳過前 2 個 packet（OpusHead + OpusTags）
+        if packet_index < 2 {
+            packet_index += 1;
+            continue;
+        }
+        packet_index += 1;
+
+        // 解碼 audio packet
+        let mut pcm = vec![0.0f32; MAX_FRAME_SIZE * channel_count];
+        let samples_per_channel = decoder
+            .decode_float(&packet.data, &mut pcm, false)
+            .map_err(|e| AudioConvertError::OggDecodeError(e.to_string()))?;
+
+        let total_samples = samples_per_channel * channel_count;
+
+        // 處理 pre_skip：跳過開頭的 pre_skip 個 samples（per channel）
+        if samples_decoded + samples_per_channel <= pre_skip {
+            // 整個 frame 都在 pre_skip 範圍內，跳過
+            samples_decoded += samples_per_channel;
+            continue;
+        }
+
+        let skip_in_frame = if samples_decoded < pre_skip {
+            pre_skip - samples_decoded
+        } else {
+            0
+        };
+        samples_decoded += samples_per_channel;
+
+        // 取出需要的 samples（跳過 skip_in_frame 個 per-channel samples）
+        let start = skip_in_frame * channel_count;
+        all_samples.extend_from_slice(&pcm[start..total_samples]);
+    }
+
+    // 轉換為 mono
+    let mono_samples = if channel_count > 1 {
+        all_samples
+            .chunks(channel_count)
+            .map(|chunk| chunk.iter().sum::<f32>() / chunk.len() as f32)
+            .collect()
+    } else {
+        all_samples
+    };
+
+    // 重採樣至 16kHz
+    let target_sample_rate: u32 = 16000;
+    let final_samples = if opus_sample_rate != target_sample_rate {
+        resample(&mono_samples, opus_sample_rate, target_sample_rate)
+    } else {
+        mono_samples
+    };
+
+    let duration_ms = (final_samples.len() as u64 * 1000) / target_sample_rate as u64;
+
+    Ok(AudioConvertResult {
+        samples: final_samples,
+        duration_ms,
+    })
+}
+
 /// 簡單線性重採樣
 fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     let ratio = from_rate as f64 / to_rate as f64;
@@ -170,11 +356,11 @@ mod tests {
     }
 
     #[test]
-    fn test_ogg_not_implemented() {
+    fn test_ogg_empty_data() {
         let result = convert_from_bytes(&[], "ogg");
         assert!(matches!(
             result,
-            Err(AudioConvertError::UnsupportedFormat(_))
+            Err(AudioConvertError::OggDecodeError(_))
         ));
     }
 
@@ -200,6 +386,12 @@ mod tests {
     fn test_invalid_wav_data() {
         let result = convert_from_bytes(&[0, 1, 2, 3], "wav");
         assert!(matches!(result, Err(AudioConvertError::WavDecodeError(_))));
+    }
+
+    #[test]
+    fn test_ogg_invalid_data() {
+        let result = convert_from_bytes(&[0, 1, 2, 3], "ogg");
+        assert!(matches!(result, Err(AudioConvertError::OggDecodeError(_))));
     }
 
     #[test]
