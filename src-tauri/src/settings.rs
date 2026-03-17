@@ -415,6 +415,13 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
             allow_base_url_edit: false,
             models_endpoint: Some("/models".to_string()),
         },
+        PostProcessProvider {
+            id: "claude-cli".to_string(),
+            label: "Claude Code (Local)".to_string(),
+            base_url: String::new(),
+            allow_base_url_edit: false,
+            models_endpoint: None,
+        },
     ];
 
     // Note: We always include Apple Intelligence on macOS ARM64 without checking availability
